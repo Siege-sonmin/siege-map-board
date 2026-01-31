@@ -1,42 +1,17 @@
-import { useEffect, useRef, useState } from "react";
-import { collection, addDoc, onSnapshot } from "firebase/firestore";
-import { db } from "./firebase";
-import mapImg from "./assets/skyscraper-2f.png";
+import { useRef, useEffect, useState } from "react";
 
 function App() {
-  const params = new URLSearchParams(window.location.search);
-  const roomId = params.get("room") ||"skyscraper-2f";
-
-  const imgRef = useRef(null);
   const canvasRef = useRef(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [mode, setMode] = useState("draw");
+  const [color, setColor] = useState("deepskyblue"); // 攻撃：青
 
-  const [pins, setPins] = useState([]);
-  const [strokes, setStrokes] = useState([]);
+  useEffect(() => {
+    const ctx = canvasRef.current.getContext("2d");
+    ctx.lineCap = "round";
+  }, []);
 
-  const [drawing, setDrawing] = useState(false);
-  const [currentStroke, setCurrentStroke] = useState([]);
-
-  
-  /* --------------------
-     画像クリック → ピン追加
-  -------------------- */
-  const handleMapClick = async (e) => {
-    if (!imgRef.current) return;
-
-    const rect = imgRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    await addDoc(
-      collection(db, "rooms", roomId, "pins"),
-      { x, y, createdAt: Date.now() }
-    );
-  };
-
-  /* --------------------
-     Canvas 座標取得
-  -------------------- */
-  const getCanvasPos = (e) => {
+  const getPos = (e) => {
     const rect = canvasRef.current.getBoundingClientRect();
     return {
       x: e.clientX - rect.left,
@@ -44,147 +19,88 @@ function App() {
     };
   };
 
-  /* --------------------
-     描画イベント
-  -------------------- */
-  const startDraw = (e) => {
-    setDrawing(true);
-    setCurrentStroke([getCanvasPos(e)]);
+  const startDrawing = (e) => {
+    const ctx = canvasRef.current.getContext("2d");
+    const pos = getPos(e);
+
+    ctx.beginPath();
+    ctx.moveTo(pos.x, pos.y);
+
+    if (mode === "erase") {
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.lineWidth = 20;
+    } else {
+      ctx.globalCompositeOperation = "source-over";
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 4;
+    }
+
+    setIsDrawing(true);
   };
 
   const draw = (e) => {
-    if (!drawing) return;
-    setCurrentStroke((prev) => [...prev, getCanvasPos(e)]);
+    if (!isDrawing) return;
+    const ctx = canvasRef.current.getContext("2d");
+    const pos = getPos(e);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
   };
 
-  const endDraw = async () => {
-    setDrawing(false);
-    if (currentStroke.length < 2) {
-      setCurrentStroke([]);
-      return;
-    }
-
-    await addDoc(
-      collection(db, "rooms", roomId, "strokes"),
-      {
-        points: currentStroke,
-        color: "blue",
-        width: 3,
-        createdAt: Date.now()
-      }
-    );
-    setCurrentStroke([]);
+  const stopDrawing = () => {
+    setIsDrawing(false);
   };
 
-  /* --------------------
-     Firestore 同期
-  -------------------- */
-  useEffect(() => {
-    const unsubPins = onSnapshot(
-      collection(db, "rooms", roomId, "pins"),
-      (snapshot) => {
-        setPins(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
-      }
-    );
-
-    const unsubStrokes = onSnapshot(
-      collection(db, "rooms", roomId, "strokes"),
-      (snapshot) => {
-        setStrokes(snapshot.docs.map((d) => d.data()));
-      }
-    );
-
-    return () => {
-      unsubPins();
-      unsubStrokes();
-    };
-  },);
-
-  /* --------------------
-     Canvas サイズ同期
-  -------------------- */
-  useEffect(() => {
-    if (!imgRef.current || !canvasRef.current) return;
+  const clearAll = () => {
     const canvas = canvasRef.current;
-    canvas.width = imgRef.current.clientWidth;
-    canvas.height = imgRef.current.clientHeight;
-  }, []);
-
-  /* --------------------
-     Canvas 再描画
-  -------------------- */
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    const drawStroke = (stroke) => {
-      if (stroke.points.length < 2) return;
-      ctx.beginPath();
-      ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
-      stroke.points.forEach((p) => ctx.lineTo(p.x, p.y));
-      ctx.strokeStyle = stroke.color;
-      ctx.lineWidth = stroke.width;
-      ctx.stroke();
-    };
-
-    strokes.forEach(drawStroke);
-    if (currentStroke.length > 1) {
-      drawStroke({ points: currentStroke, color: "blue", width: 3 });
-    }
-  }, [strokes, currentStroke]);
+  };
 
   return (
-    <div style={{ padding: 20 }}>
-      <h2>Skyscraper 2F - Tactical Board</h2>
+    <div style={{ textAlign: "center" }}>
+      <h1>Skyscraper 2F</h1>
 
-      <div
-        style={{
-          position: "relative",
-          display: "inline-block"
-        }}
-        onClick={handleMapClick}
-      >
+      {/* 操作パネル */}
+      <div style={{ marginBottom: 10 }}>
+        <button onClick={() => setMode("draw")}>✏️ ペン</button>
+        <button onClick={() => setMode("erase")}>🧽 消しゴム</button>
+
+        <span style={{ margin: "0 10px" }}>|</span>
+
+        <button onClick={() => setColor("deepskyblue")}>
+          🔵 攻撃
+        </button>
+        <button onClick={() => setColor("red")}>
+          🔴 防衛
+        </button>
+
+        <span style={{ margin: "0 10px" }}>|</span>
+
+        <button onClick={clearAll}>🗑 全消去</button>
+      </div>
+
+      <div style={{ position: "relative", display: "inline-block" }}>
         <img
-          ref={imgRef}
-          src={mapImg}
-          alt="map"
-          style={{ maxWidth: 800, width: "100%" }}
+          src="/maps/skyscraper/2f.png"
+          alt="Skyscraper 2F Map"
+          width={800}
         />
 
-        {/* Canvas（描画用） */}
         <canvas
           ref={canvasRef}
+          width={800}
+          height={800}
           style={{
             position: "absolute",
-            left: 0,
             top: 0,
-            cursor: "crosshair"
+            left: 0,
+            cursor: mode === "erase" ? "not-allowed" : "crosshair"
           }}
-          onMouseDown={startDraw}
+          onMouseDown={startDrawing}
           onMouseMove={draw}
-          onMouseUp={endDraw}
-          onMouseLeave={endDraw}
+          onMouseUp={stopDrawing}
+          onMouseLeave={stopDrawing}
         />
-
-        {/* ピン表示 */}
-        {pins.map((pin) => (
-          <div
-            key={pin.id}
-            style={{
-              position: "absolute",
-              left: pin.x - 6,
-              top: pin.y - 6,
-              width: 12,
-              height: 12,
-              borderRadius: "50%",
-              background: "red",
-              pointerEvents: "none"
-            }}
-          />
-        ))}
       </div>
     </div>
   );
